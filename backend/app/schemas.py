@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 
@@ -31,8 +31,7 @@ class URLResponse(URLBase):
     id: int
     date_added: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class URLListResponse(BaseModel):
@@ -41,8 +40,7 @@ class URLListResponse(BaseModel):
     page: int
     per_page: int
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 
@@ -62,8 +60,7 @@ class UserResponse(BaseModel):
     is_admin: bool
     created_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Token(BaseModel):

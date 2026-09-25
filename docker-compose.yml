@@ -20,7 +20,7 @@ services:
       # Create a top-level `.env` (not committed) or set these variables in your shell.
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
     #ports:
-    #  - "8000:8000"
+    #  - "8000:8000" #keep it closed for security, frontend will proxy requests
     # Run uvicorn with proxy headers and an explicit log level
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --log-level info
     depends_on:
@@ -39,7 +39,7 @@ services:
       context: ./frontend
     container_name: stopphishing_frontend
     ports:
-      - "80:80" # host:container -> map host 80 to nginx 80
+      - "80:80" # host:container -> map host 80 to nginx 80 
     depends_on:
       - backend
     restart: unless-stopped
@@ -57,7 +57,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     #ports:
-    #  - "5432:5432"
+    #  - "5432:5432" #keep it closed for security
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stopphish} -d ${POSTGRES_DB:-stopphishing} -h localhost || exit 1"]
       interval: 10s

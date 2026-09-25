@@ -16,30 +16,105 @@ logger = get_logger(__name__)
 # -------- CSV IMPORT -------- #
 
 def import_csv(file_content: str, db: Session):
-    # Try to detect delimiter (comma/semicolon/tab) to be tolerant of different CSV formats
-    sample = file_content[:4096]
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=[',', ';', '\t'])
-        delim = dialect.delimiter
-    except Exception:
-        delim = ','
+    """Legacy import function - processes entire file at once."""
+    existing_urls = set([r[0] for r in db.query(URL.url).all()]) if db.query(URL).count() > 0 else set()
+    return _process_csv_content(file_content, db, existing_urls, None, None, True)
 
-    reader = csv.DictReader(StringIO(file_content), delimiter=delim)
+
+def import_csv_chunked(
+    file_content: str, 
+    db: Session,
+    existing_urls: set = None,
+    delimiter: str = None,
+    fieldnames: list = None,
+    is_first_chunk: bool = True
+):
+    """
+    Process a chunk of CSV content. Handles partial rows at chunk boundaries.
+    
+    Args:
+        file_content: CSV content (may be partial chunk)
+        db: Database session
+        existing_urls: Set of existing URLs to check duplicates
+        delimiter: CSV delimiter (detected on first chunk)
+        fieldnames: CSV column names (detected on first chunk)
+        is_first_chunk: Whether this is the first chunk (for header detection)
+    
+    Returns:
+        dict with: inserted, skipped, buffer (remaining partial row), delimiter, fieldnames, inserted_urls
+    """
+    if existing_urls is None:
+        existing_urls = set([r[0] for r in db.query(URL.url).all()]) if db.query(URL).count() > 0 else set()
+    
+    return _process_csv_content(file_content, db, existing_urls, delimiter, fieldnames, is_first_chunk, chunked=True)
+
+
+def _process_csv_content(
+    file_content: str,
+    db: Session,
+    existing_urls: set,
+    delimiter: str = None,
+    fieldnames: list = None,
+    is_first_chunk: bool = True,
+    chunked: bool = False
+):
+    """
+    Internal function to process CSV content.
+    For chunked processing, handles partial rows at boundaries.
+    """
+    # Detect delimiter on first chunk
+    if delimiter is None:
+        sample = file_content[:4096] if len(file_content) > 4096 else file_content
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=[',', ';', '\t'])
+            delimiter = dialect.delimiter
+        except Exception:
+            delimiter = ','
+    
+    # Find the last complete line (for chunked processing)
+    buffer = ""
+    content_to_process = file_content
+    
+    if chunked:
+        # Find last newline to identify complete rows
+        last_newline = file_content.rfind('\n')
+        if last_newline != -1:
+            # Process complete rows, keep partial row in buffer
+            content_to_process = file_content[:last_newline + 1]
+            buffer = file_content[last_newline + 1:]
+        # If no newline found, entire chunk might be a partial row
+        elif file_content:
+            buffer = file_content
+            content_to_process = ""
+    
+    if not content_to_process:
+        # No complete rows to process, return buffer
+        return {
+            "inserted": 0,
+            "skipped": 0,
+            "buffer": buffer,
+            "delimiter": delimiter,
+            "fieldnames": fieldnames,
+            "inserted_urls": []
+        }
+    
+    reader = csv.DictReader(StringIO(content_to_process), delimiter=delimiter, fieldnames=fieldnames)
+    
+    # Capture fieldnames on first chunk
+    if is_first_chunk and reader.fieldnames:
+        fieldnames = reader.fieldnames
+        # Log detected headers
+        try:
+            norm_fieldnames = [fn.strip().lower() if fn else fn for fn in fieldnames]
+            logger.info("import_csv: detected delimiter='%s' headers=%s", delimiter, fieldnames)
+            logger.debug("import_csv: normalized headers=%s", norm_fieldnames)
+        except Exception:
+            logger.debug("import_csv: could not read headers")
+    
     created_count = 0
     skipped = []
-
-    # preload existing URLs from DB to avoid unique constraint violations
-    existing_urls = set([r[0] for r in db.query(URL.url).all()]) if db.query(URL).count() > 0 else set()
     seen = set()
-
-    # Log the detected header keys (normalized) to aid debugging
-    try:
-        raw_fieldnames = reader.fieldnames or []
-        norm_fieldnames = [fn.strip().lower() if fn else fn for fn in raw_fieldnames]
-        logger.info("import_csv: detected delimiter='%s' headers=%s", delim, raw_fieldnames)
-        logger.debug("import_csv: normalized headers=%s", norm_fieldnames)
-    except Exception:
-        logger.debug("import_csv: could not read headers")
+    inserted_urls = []
 
     def _parse_risk_field(val):
         """Parse a CSV risk/threat field which may be textual ('high','malicious')
@@ -118,18 +193,35 @@ def import_csv(file_content: str, db: Session):
         db.add(new_url)
         created_count += 1
         seen.add(url_value)
+        inserted_urls.append(url_value)
+        
+        # Commit in batches of 1000 to avoid long transactions
+        if created_count % 1000 == 0:
+            db.commit()
+            logger.debug("Committed batch: %d URLs inserted so far", created_count)
 
+    # Final commit
     db.commit()
 
     logger.info("import_csv: inserted=%s skipped=%s", created_count, len(skipped))
-    if skipped:
-        # log up to 10 skipped rows for debugging (show normalized rows)
+    if skipped and not chunked:
+        # log up to 10 skipped rows for debugging (only for non-chunked)
         logger.debug("import_csv skipped rows sample: %s", skipped[:10])
 
-    return {
+    result = {
         "inserted": created_count,
         "skipped": len(skipped),
     }
+    
+    if chunked:
+        result.update({
+            "buffer": buffer,
+            "delimiter": delimiter,
+            "fieldnames": fieldnames,
+            "inserted_urls": inserted_urls
+        })
+    
+    return result
 
 
 # -------- CSV EXPORT -------- #

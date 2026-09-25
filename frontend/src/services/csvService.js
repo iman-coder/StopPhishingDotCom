@@ -15,12 +15,25 @@ export async function exportCSV() {
     return response.data;
 }
 
-export async function importCSV(file) {
+export async function importCSV(file, onProgress) {
     const formData = new FormData();
     formData.append("file", file);
 
     const response = await axios.post(`${API}/import`, formData, {
-        headers: { "Content-Type": "multipart/form-data" }
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (progressEvent) => {
+            if (onProgress && progressEvent.total) {
+                const percentCompleted = Math.round(
+                    (progressEvent.loaded * 100) / progressEvent.total
+                );
+                onProgress({
+                    type: 'upload',
+                    percent: percentCompleted,
+                    loaded: progressEvent.loaded,
+                    total: progressEvent.total
+                });
+            }
+        }
     });
     return response.data;
 }

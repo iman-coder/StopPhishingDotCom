@@ -1,14 +1,32 @@
-fastapi
-uvicorn
-sqlalchemy
-psycopg2-binary
-pydantic
-python-dotenv
-alembic
-pytest
-python-multipart
-python-json-logger
-redis
-passlib[bcrypt]
+# Web Framework
+fastapi>=0.104.0,<0.110.0
+uvicorn[standard]>=0.23.0,<0.30.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+alembic>=1.12.0
+
+# Data Validation - Pydantic v2
+pydantic>=2.0.0,<3.0.0
+
+# Authentication & Security
 python-jose[cryptography]
+passlib[bcrypt]
+
+# Environment & Configuration
+python-dotenv
+
+# Caching
+redis
+
+# Logging
+python-json-logger
+
+# HTTP Client (for testing/external requests)
 httpx
+
+# Testing
+pytest
+pytest-asyncio

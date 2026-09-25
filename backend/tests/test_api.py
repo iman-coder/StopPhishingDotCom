@@ -1,4 +1,5 @@
 import os
+import io
 
 # Ensure test environment variables are set before importing the app
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -49,3 +50,45 @@ def test_create_and_list_url():
     assert r.status_code == 200
     urls = r.json()
     assert any(u.get("url") == "http://example.com" for u in urls)
+
+
+def test_chunked_csv_import():
+    """Test chunked CSV import via API endpoint."""
+    # Get auth token
+    r = client.post("/auth/token", data={"username": "admin", "password": "changeme"})
+    assert r.status_code == 200
+    token = r.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create a CSV file that will be processed in chunks
+    # Generate a large CSV content (simulating 100MB file with smaller data for testing)
+    header = "url,domain,threat,status,source\n"
+    rows = []
+    for i in range(500):  # 500 rows for testing
+        rows.append(f"https://test{i}.example.com,test{i}.example.com,malicious,new,import\n")
+    
+    csv_content = header + "".join(rows)
+    
+    # Create file-like object
+    csv_file = io.BytesIO(csv_content.encode("utf-8"))
+    
+    # Upload CSV
+    files = {"file": ("test.csv", csv_file, "text/csv")}
+    r = client.post("/urls/import", files=files, headers=headers)
+    
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    result = r.json()
+    
+    # Verify results
+    assert "inserted" in result
+    assert "skipped" in result
+    assert result["inserted"] == 500, f"Expected 500 inserted, got {result['inserted']}"
+    
+    # Verify chunks_processed is present (indicates chunked processing)
+    assert "chunks_processed" in result or "total_size_bytes" in result
+    
+    # Verify URLs were actually inserted
+    r = client.get("/urls/", headers=headers)
+    assert r.status_code == 200
+    urls = r.json()
+    assert len(urls.get("items", [])) >= 500, f"Expected at least 500 URLs, got {len(urls.get('items', []))}"
